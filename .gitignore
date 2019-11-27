@@ -1,0 +1,12 @@
+*.bat
+*.pdf
+*.pyc
+*.txt
+*.npy
+
+*/cifar-10-batches-py/
+*/dataset_cifar10/
+*/dataset_mnist/
+
+.env
+
