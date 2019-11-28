@@ -6,12 +6,14 @@ module fc #
  (   //AXI-STREAM
     input wire                                            clk,
     input wire                                            rstn,
+    // S_AXI ports for receiving data
     output wire                                           S_AXIS_TREADY,
-    input wire [C_S00_AXIS_TDATA_WIDTH-1 : 0]             S_AXIS_TDATA,
-    input wire [(C_S00_AXIS_TDATA_WIDTH/8)-1 : 0]         S_AXIS_TKEEP,
-    input wire                                            S_AXIS_TUSER,
-    input wire                                            S_AXIS_TLAST,
-    input wire                                            S_AXIS_TVALID,
+    input wire [C_S00_AXIS_TDATA_WIDTH-1 : 0]             S_AXIS_TDATA,  
+    input wire [(C_S00_AXIS_TDATA_WIDTH/8)-1 : 0]         S_AXIS_TKEEP,  
+    input wire                                            S_AXIS_TUSER,  
+    input wire                                            S_AXIS_TLAST,  
+    input wire                                            S_AXIS_TVALID, 
+    // M_AXI ports for sending data
     input wire                                            M_AXIS_TREADY,
     output wire                                           M_AXIS_TUSER,
     output wire [C_S00_AXIS_TDATA_WIDTH-1 : 0]            M_AXIS_TDATA,
