@@ -13,7 +13,7 @@ reg en;
 wire done;
 wire mout;
 
-mac #(.A_BITWIDTH(8), .OUTBITWIDTH(16)) 
+mac #(.A_BITWIDTH(8), .OUT_BITWIDTH(23)) 
     dut (
         .clk(clk),
         .rstn(rstn),
