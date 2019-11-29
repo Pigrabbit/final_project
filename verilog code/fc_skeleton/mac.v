@@ -3,7 +3,7 @@
 module mac #(
     parameter integer A_BITWIDTH = 8,
     parameter integer B_BITWIDTH = A_BITWIDTH,
-    parameter integer OUT_BITWIDTH = 19, // need to be changed
+    parameter integer OUT_BITWIDTH = 16, // need to be changed
     parameter integer C_BITWIDTH = OUT_BITWIDTH - 1
 )
 (
@@ -76,7 +76,7 @@ always @(posedge clk or negedge rstn) begin
                 if (en & !done) begin
                     tmp_data_a <= data_a;
                     tmp_data_b <= data_b;
-                    tmp_data_c <= data_c;
+                    tmp_data_c[A_BITWIDTH-1:0] <= data_c;
                 end
             end
             STATE_MULT: begin
