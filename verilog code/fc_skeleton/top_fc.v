@@ -32,7 +32,19 @@ module top_fc #
     input wire [31:0]                                 PWDATA,
     output wire [31:0]                                PRDATA,
     output wire                                       PREADY,
-    output wire                                       PSLVERR
+    output wire                                       PSLVERR,
+
+/// design reference from module_example
+    input wire [2:0] COMMAND,
+    input wire [20:0] receive_size,
+    output wire F_writedone,
+    output wire W_writedone,
+    output wire B_writedone,
+    output wire cal_done,
+    input wire fc_start,
+    output wire fc_done,
+    output reg start_response,
+    input wire done_response
     );
 
  // For FC control path
@@ -51,20 +63,20 @@ clk_counter u_clk_counter(
         .clk_counter(clk_counter)
     );
 
-apb_fc u_apb_fc(
-        .PCLK(CLK),
-        .PRESETB(RESETN),
-        .PADDR({16'd0,PADDR[15:0]}),
-        .PSEL(PSEL),
-        .PENABLE(PENABLE),
-        .PWRITE(PWRITE),
-        .PWDATA(PWDATA),
-        .fc_start(fc_start),
-        .fc_done(fc_done),
-        .clk_counter(clk_counter),
-        .max_index(max_index),
-        .PRDATA(PRDATA)
-      );
+// apb_fc u_apb_fc(
+//         .PCLK(CLK),
+//         .PRESETB(RESETN),
+//         .PADDR({16'd0,PADDR[15:0]}),
+//         .PSEL(PSEL),
+//         .PENABLE(PENABLE),
+//         .PWRITE(PWRITE),
+//         .PWDATA(PWDATA),
+//         .fc_start(fc_start),
+//         .fc_done(fc_done),
+//         .clk_counter(clk_counter),
+//         .max_index(max_index),
+//         .PRDATA(PRDATA)
+//       );
 
 fc u_fc(
         .clk(CLK),
@@ -83,7 +95,14 @@ fc u_fc(
         .M_AXIS_TVALID(M_AXIS_TVALID),
         .fc_start(fc_start),
         .max_index(max_index),
-        .fc_done(fc_done)
+        .fc_done(fc_done),
+        /// reference from module_example
+        .COMMAND(COMMAND),
+        .receive_size(receive_size),
+        .F_writedone(F_writedone),
+        .W_writedone(W_writedone),
+        .B_writedone(B_writedone),
+        .cal_done(cal_done)
       );
 
 

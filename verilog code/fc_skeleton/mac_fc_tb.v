@@ -1,6 +1,6 @@
 `timescale 1ns/1ps;
 
-module mac_tb;
+module mac_fc_tb;
 
 parameter CLK_CYCLE = 5;
 
