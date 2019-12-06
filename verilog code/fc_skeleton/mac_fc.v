@@ -1,6 +1,6 @@
 `timescale 1ns/1ps;
 
-module mac #(
+module mac_fc #(
     parameter integer A_BITWIDTH = 8,
     parameter integer B_BITWIDTH = A_BITWIDTH,
     parameter integer OUT_BITWIDTH = 16, // need to be changed
