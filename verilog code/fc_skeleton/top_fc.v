@@ -3,7 +3,9 @@
 
 module top_fc #
 (
-   parameter integer C_S00_AXIS_TDATA_WIDTH   = 32
+    parameter integer C_S00_AXIS_TDATA_WIDTH   = 32,
+    parameter integer INPUT_SIZE = 256,
+    parameter integer OUTPUT_SIZE = 64
 )
 (
     input wire                                        CLK,
@@ -44,7 +46,8 @@ module top_fc #
     input wire fc_start,
     output wire fc_done,
     output reg start_response,
-    input wire done_response
+    input wire done_response,
+    input wire relu
     );
 
  // For FC control path
@@ -78,7 +81,8 @@ clk_counter u_clk_counter(
 //         .PRDATA(PRDATA)
 //       );
 
-fc u_fc(
+fc #(.INPUT_SIZE(INPUT_SIZE), .OUTPUT_SIZE(OUTPUT_SIZE))
+    u_fc(
         .clk(CLK),
         .rstn(RESETN),
         .S_AXIS_TREADY(S_AXIS_TREADY),
@@ -102,7 +106,8 @@ fc u_fc(
         .F_writedone(F_writedone),
         .W_writedone(W_writedone),
         .B_writedone(B_writedone),
-        .cal_done(cal_done)
+        .cal_done(cal_done),
+        .relu(relu)
       );
 
 
