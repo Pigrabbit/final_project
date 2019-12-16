@@ -63,13 +63,13 @@ generate for(i = 0; i < 32; i = i + 1) begin: generate_mul32
 endgenerate
 // adder 16 add up two products of I and W
 generate for(i = 0; i < 16; i = i + 1) begin: generate_adder16
-    mac_fc #(.A_BITWIDTH(15), .OUT_BITWIDTH(16))
+    mac_fc #(.A_BITWIDTH(15), .B_BITWIDTH(2), .OUT_BITWIDTH(16))
         u_mac_stage1_adder16 (
             .clk(clk),
             .rstn(rstn),
             .en(stage1_adder16_en[i]),
             .data_a(stage0_mul32_out[2 * i]),
-            .data_b(15'b1),
+            .data_b(2'b01),
             .data_c(stage0_mul32_out[2 * i + 1]),
             .mout(stage1_adder16_out[i]),
             .done(stage1_adder16_done[i])
@@ -78,13 +78,13 @@ generate for(i = 0; i < 16; i = i + 1) begin: generate_adder16
 endgenerate
 
 generate for(i = 0; i < 8; i = i + 1) begin: generate_adder8
-    mac_fc #(.A_BITWIDTH(16), .OUT_BITWIDTH(17))
+    mac_fc #(.A_BITWIDTH(16), .B_BITWIDTH(2), .OUT_BITWIDTH(17))
         u_mac_stage2_adder8 (
             .clk(clk),
             .rstn(rstn),
             .en(stage2_adder8_en[i]),
             .data_a(stage1_adder16_out[2 * i]),
-            .data_b(16'b1),
+            .data_b(2'b01),
             .data_c(stage1_adder16_out[2 * i + 1]),
             .mout(stage2_adder8_out[i]),
             .done(stage2_adder8_done[i])
@@ -93,13 +93,13 @@ generate for(i = 0; i < 8; i = i + 1) begin: generate_adder8
 endgenerate
 
 generate for(i = 0; i < 4; i = i + 1) begin: generate_adder4
-    mac_fc #(.A_BITWIDTH(17), .OUT_BITWIDTH(18))
+    mac_fc #(.A_BITWIDTH(17), .B_BITWIDTH(2), .OUT_BITWIDTH(18))
         u_mac_stage3_adder4 (
             .clk(clk),
             .rstn(rstn),
             .en(stage3_adder4_en[i]),
             .data_a(stage2_adder8_out[2 * i]),
-            .data_b(17'b1),
+            .data_b(2'b01),
             .data_c(stage2_adder8_out[2 * i + 1]),
             .mout(stage3_adder4_out[i]),
             .done(stage3_adder4_done[i])
@@ -108,13 +108,13 @@ generate for(i = 0; i < 4; i = i + 1) begin: generate_adder4
 endgenerate
 
 generate for(i = 0; i < 2; i = i + 1) begin: generate_adder2
-    mac_fc #(.A_BITWIDTH(18), .OUT_BITWIDTH(19))
+    mac_fc #(.A_BITWIDTH(18), .B_BITWIDTH(2), .OUT_BITWIDTH(19))
         u_mac_stage4_adder2 (
             .clk(clk),
             .rstn(rstn),
             .en(stage4_adder2_en[i]),
             .data_a(stage3_adder4_out[2 * i]),
-            .data_b(18'b1),
+            .data_b(2'b01),
             .data_c(stage3_adder4_out[2 * i + 1]),
             .mout(stage4_adder2_out[i]),
             .done(stage4_adder2_done[i])
@@ -122,13 +122,13 @@ generate for(i = 0; i < 2; i = i + 1) begin: generate_adder2
     end
 endgenerate
 
-mac_fc #(.A_BITWIDTH(19), .OUT_BITWIDTH(20))
+mac_fc #(.A_BITWIDTH(19), .B_BITWIDTH(2), .OUT_BITWIDTH(20))
     u_mac_stage5_adder1 (
         .clk(clk),
         .rstn(rstn),
         .en(stage5_adder1_en),
         .data_a(stage4_adder2_out[0]),
-        .data_b(19'b1),
+        .data_b(2'b01),
         .data_c(stage4_adder2_out[1]),
         .mout(stage5_adder1_out),
         .done(stage5_adder1_done)
@@ -191,7 +191,7 @@ always @(posedge clk or negedge rstn) begin
     else begin
         case(state)
             STATE_IDLE: begin
-                
+                done <= 1'b0;
             end
 
             STATE_STAGE0: begin
