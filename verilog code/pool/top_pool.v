@@ -1,6 +1,6 @@
 `timescale 1ns / 1ps
 
-module top_conv #
+module top_pool #
 (
      parameter integer C_S00_AXIS_TDATA_WIDTH   = 32  
 )
@@ -21,20 +21,25 @@ module top_conv #
     output wire                                           M_AXIS_TLAST,
     output wire                                           M_AXIS_TVALID,
    // APB
-   input wire [31:0]  PADDR, // APB address
-   input wire         PSEL, // APB select
-   input wire         PENABLE, // APB enable
-   input wire         PWRITE, // APB write enable
-   input wire [31:0]  PWDATA, // APB write data
-   output wire        PSLVERR,
-   output wire        PREADY,
-   output wire [31:0] PRDATA   // APB read data
-    );
+    input wire [31:0]  PADDR, // APB address
+    input wire         PSEL, // APB select
+    input wire         PENABLE, // APB enable
+    input wire         PWRITE, // APB write enable
+    input wire [31:0]  PWDATA, // APB write data
+    output wire        PSLVERR,
+    output wire        PREADY,
+    output wire [31:0] PRDATA   // APB read data
+     );
 
- // For CONV control path
-    wire          conv_start;   // you can use respond of this signal for handshaking
-    wire          conv_done;    // you can use respond of this signal for handshaking
-    wire [31:0]   clk_counter;
+
+ // For Pool control path
+    wire          pool_start;   // you can use respond of this signal for handshaking
+    wire          pool_done;    // you can use respond of this signal for handshaking
+    wire   [7:0]  width;
+    wire   [8:0]  length;
+    wire   [7:0]  height;
+    wire   [31:0] clk_counter;
+
     assign PREADY = 1'b1;
     assign PSLVERR = 1'b0;
     
@@ -44,15 +49,15 @@ module top_conv #
    clk_counter u_clk_counter(
         .clk(CLK),
         .rstn(RESETN),
-        .start(conv_start),
-        .done(conv_done),
+        .start(pool_start),
+        .done(pool_done),
         .clk_counter(clk_counter)
     );
 
-   conv  #
+   pool  #
     (    
         .C_S00_AXIS_TDATA_WIDTH(C_S00_AXIS_TDATA_WIDTH) 
-   ) u_conv
+   ) u_pool
    (   //AXI-STREAM
         .clk(CLK),
         .rstn(RESETN),
@@ -69,11 +74,13 @@ module top_conv #
         .M_AXIS_TLAST(M_AXIS_TLAST),
         .M_AXIS_TVALID(M_AXIS_TVALID),
         //Control
-        .conv_start(conv_start),
-        .conv_done(conv_done)
+        .pool_start_external(pool_start),
+        .width_external(width),
+        .length_external(length),
+        .height_external(height),
+        .pool_done(pool_done)
    );
-   
-   apb_conv u_apb_conv(
+  apb_pool u_apb_pool(
            .PCLK(CLK),
            .PRESETB(RESETN),
            .PADDR({16'd0,PADDR[15:0]}),
@@ -81,10 +88,14 @@ module top_conv #
            .PENABLE(PENABLE),
            .PWRITE(PWRITE),
            .PWDATA(PWDATA),
-           .conv_start(conv_start),
-           .conv_done(conv_done),
+           .pool_start(pool_start),
+           .pool_done(pool_done),
+           .width(width),
+           .length(length),
+           .height(height),
            .clk_counter(clk_counter),
            .PRDATA(PRDATA)
          );
+   
    
 endmodule

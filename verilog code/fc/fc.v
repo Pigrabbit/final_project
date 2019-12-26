@@ -2,8 +2,11 @@ module fc #
  (
       parameter integer C_S00_AXIS_TDATA_WIDTH   = 32,
       parameter integer BYTE_SIZE = 8,
-      parameter integer INPUT_SIZE = 256,
-      parameter integer OUTPUT_SIZE = 64
+      parameter integer MAX_INPUT_SIZE = 1568,
+      parameter integer MAX_OUTPUT_SIZE = 256,
+      parameter integer MAX_PARTIAL_SUM_BITWIDTH = 26
+      // parameter integer INPUT_SIZE = 256,
+      // parameter integer OUTPUT_SIZE = 10
  )
  (   //AXI-STREAM
     input wire                                            clk,
@@ -25,12 +28,18 @@ module fc #
 
      //Control
     input                                                 fc_start,
-    output reg [31:0]                                     max_index, // Only for last fully connected layer. It has same functionality with softmax. If output size is 10, max_index indicate index of value which is largest of 10 outputs.
+    output reg [31:0]                                     max_index, // Only for last fully connected layer. It has same functionality with softmax. If output size is 10, max_inde indicate index of value which is largest of 10 outputs.
     output reg                                            fc_done,
 
+    // for debugging
+    output reg [15:0]                                     iter,
+    output reg [31:0]                                     output_debug,
+
     // design reference from module_example
-    input wire [2:0] COMMAND,
-    input wire [20:0] receive_size,
+    input wire [31:0]   input_size_external,
+    input wire [31:0]   output_size_external,
+    input wire [2:0]    COMMAND,
+    // input wire [20:0]   receive_size,
     output reg F_writedone,
     output reg W_writedone,
     output reg B_writedone,
@@ -38,13 +47,16 @@ module fc #
     input wire relu
   );
 
-localparam integer BIAS_SIZE = OUTPUT_SIZE;
-localparam integer WEIGHT_SIZE = INPUT_SIZE * OUTPUT_SIZE;
-localparam integer MAX_ITER_ACCUMULATION = INPUT_SIZE >> 5;
+
+// localparam integer BIAS_SIZE = OUTPUT_SIZE;
+// localparam integer WEIGHT_SIZE = INPUT_SIZE * OUTPUT_SIZE;
+// localparam integer MAX_ITER_ACCUMULATION = INPUT_SIZE >> 5;
 localparam integer ACC_32_OUT_BITWIDTH = 20;
-localparam integer PARTIAL_SUM_BITWIDTH = ACC_32_OUT_BITWIDTH + $clog2(MAX_ITER_ACCUMULATION);
-localparam integer MAC_PARTIAL_SUM_ACC_B_BITWIDTH = PARTIAL_SUM_BITWIDTH - ACC_32_OUT_BITWIDTH + 1;
-localparam integer MAC_BIAS_ADDER_B_BITWIDTH = PARTIAL_SUM_BITWIDTH - BYTE_SIZE + 1;
+// localparam integer PARTIAL_SUM_BITWIDTH = ACC_32_OUT_BITWIDTH + $clog2(MAX_ITER_ACCUMULATION);
+// localparam integer MAC_PARTIAL_SUM_ACC_B_BITWIDTH = PARTIAL_SUM_BITWIDTH - ACC_32_OUT_BITWIDTH + 1;
+// localparam integer MAC_BIAS_ADDER_B_BITWIDTH = PARTIAL_SUM_BITWIDTH - BYTE_SIZE + 1;
+localparam integer MAC_PARTIAL_SUM_ACC_B_BITWIDTH = 2;
+localparam integer MAC_BIAS_ADDER_B_BITWIDTH = 8;
 
 // fc states parameter
 localparam STATE_IDLE             = 4'b0000;
@@ -76,6 +88,16 @@ assign M_AXIS_TVALID = m_axis_tvalid;
 assign M_AXIS_TUSER = 1'b0;
 assign M_AXIS_TKEEP = {(C_S00_AXIS_TDATA_WIDTH/8) {1'b1}};   
 
+reg   [31:0]  input_size;
+reg   [31:0]  output_size;
+reg   [31:0]  bias_size;
+reg   [31:0]  weight_size;
+reg   [31:0]  max_iter_accumulation;
+reg   [31:0]  acc_32_out_bitwidth;
+reg   [31:0]  partial_sum_bitwidth;
+reg   [31:0]  mac_partial_sum_acc_b_bitwidth;
+reg   [31:0]  mac_bias_adder_b_bitwidth;
+
 reg   [31:0]  input_number_of_line;
 reg   [31:0]  output_number_of_line;
 reg   [31:0]  bias_number_of_line;
@@ -95,39 +117,39 @@ reg   [7:0]   bram_delay;
 reg           acc_en;
 wire          acc_done;
 reg   [3:0]   acc_delay;
-wire  [ACC_32_OUT_BITWIDTH-1:0]  acc_result;
+wire  [19:0]  acc_result;         
 reg   [255:0] feature_buffer;
 reg   [255:0] weight_buffer;
 reg signed  [7:0]   bias_buffer;
-reg signed  [7:0]   output_buffer [0:OUTPUT_SIZE-1];
+reg signed  [7:0]   output_buffer [0:MAX_OUTPUT_SIZE-1]; // define array size as MAX_OUT_SIZE
 
 reg   [3:0]   cal_state;
 reg   [7:0]   acc_counter;
-reg   [7:0]   feature_counter;    
+reg   [15:0]   feature_counter;    
 reg   [7:0]   weight_counter;
 reg   [7:0]   bias_counter;
 reg   [3:0]   bias_pointer;   
-reg   [7:0]   out_counter;
+reg   [15:0]   out_counter;
 reg   [7:0]   partial_sum_counter;
-reg   [7:0]   iter;
+// reg   [15:0]   iter;
 
 // partial sum buffer
-reg signed [ACC_32_OUT_BITWIDTH-1:0]  tmp_partial_sum [0:MAX_ITER_ACCUMULATION-1]; // INPUT:256 --> [0:7], INPUT:1024 --> [0:31]
+reg signed [19:0]  tmp_partial_sum [0:48]; // INPUT:256 --> [0:7], INPUT:1024 --> [0:31], INPUT: 1568 --> [0:48]
 
 // MAC partial sum accumulator signal
 reg                                           partial_sum_acc_en;
-reg   [ACC_32_OUT_BITWIDTH-1:0]               partial_sum_acc_data_a;
+reg   [19:0]                                  partial_sum_acc_data_a;
 reg   [MAC_PARTIAL_SUM_ACC_B_BITWIDTH-1:0]    partial_sum_acc_data_b;
-reg   [PARTIAL_SUM_BITWIDTH-1:0]              partial_sum_acc_data_c;  // INPUT:256 --> 20-bits 8 numbers are summed up. 20 + log_2(8) = 23
-wire  [PARTIAL_SUM_BITWIDTH-1:0]              partial_sum_acc_out;     // INPUT:1024 --> 20-bits 32 numbers are summed up. 20+ log_2(32) = 25
+reg   [MAX_PARTIAL_SUM_BITWIDTH-1:0]          partial_sum_acc_data_c;  // INPUT:256 --> 20-bits 8 numbers are summed up. 20 + log_2(8) = 23
+wire  [MAX_PARTIAL_SUM_BITWIDTH-1:0]          partial_sum_acc_out;     // INPUT:1024 --> 20-bits 32 numbers are summed up. 20+ log_2(32) = 25
 wire                                          partial_sum_acc_done;
 
 // MAC bias adder signal
 reg                                     bias_adder_en;
 reg   [7:0]                             bias_adder_data_a;  // BIAS_SIZE
 reg   [MAC_BIAS_ADDER_B_BITWIDTH-1:0]   bias_adder_data_b;  // to meet data_c size: data_c_length - data_a_length + 1
-reg   [PARTIAL_SUM_BITWIDTH-1:0]        bias_adder_data_c;   
-wire  [PARTIAL_SUM_BITWIDTH:0]          bias_adder_out;
+reg   [MAX_PARTIAL_SUM_BITWIDTH-1:0]    bias_adder_data_c;   
+wire  [MAX_PARTIAL_SUM_BITWIDTH:0]      bias_adder_out;
 wire                                    bias_adder_done;
 
 // control signals
@@ -164,7 +186,7 @@ accumulation_32 u_accumulation_32 (
 // OUT_BITWIDTH of u_mac_partial_sum_acc needed to be parameterized
 // eg INPUT_SIZE = 256
 // A_BITWIDTH = 20, B_BITWIDTH = 4, OUT_BITWIDTH = 24
-mac_fc #(.A_BITWIDTH(ACC_32_OUT_BITWIDTH), .B_BITWIDTH(MAC_PARTIAL_SUM_ACC_B_BITWIDTH), .OUT_BITWIDTH(PARTIAL_SUM_BITWIDTH + 1))
+mac_fc #(.A_BITWIDTH(ACC_32_OUT_BITWIDTH), .B_BITWIDTH(MAC_PARTIAL_SUM_ACC_B_BITWIDTH), .OUT_BITWIDTH(MAX_PARTIAL_SUM_BITWIDTH + 1))
   u_mac_partial_sum_acc (
     .clk(clk),
     .rstn(rstn),
@@ -179,7 +201,7 @@ mac_fc #(.A_BITWIDTH(ACC_32_OUT_BITWIDTH), .B_BITWIDTH(MAC_PARTIAL_SUM_ACC_B_BIT
 // A_BITWIDTH is fixed to BIAS_SIZE
 // B_BITWIDTH is realted to difference between OUT_BITWIDTH and A_BITWIDTH
 // OUT_BITWIDTH is related to MAX_ITER_ACCUMULATION
-mac_fc #(.A_BITWIDTH(BYTE_SIZE), .B_BITWIDTH(MAC_BIAS_ADDER_B_BITWIDTH), .OUT_BITWIDTH(PARTIAL_SUM_BITWIDTH + 1))
+mac_fc #(.A_BITWIDTH(BYTE_SIZE), .B_BITWIDTH(MAC_BIAS_ADDER_B_BITWIDTH), .OUT_BITWIDTH(MAX_PARTIAL_SUM_BITWIDTH + 1))
   u_mac_bias_adder (
     .clk(clk),
     .rstn(rstn),
@@ -191,6 +213,37 @@ mac_fc #(.A_BITWIDTH(BYTE_SIZE), .B_BITWIDTH(MAC_BIAS_ADDER_B_BITWIDTH), .OUT_BI
     .done(bias_adder_done)
 );
 
+// buffering external signals
+always @(posedge clk or negedge rstn) begin
+  if(!rstn) begin
+    input_size <= 32'b0;
+    output_size <= 32'b0;
+    bias_size <= 32'b0;
+    weight_size <= 32'b0;
+    max_iter_accumulation <= 32'b0;
+    acc_32_out_bitwidth <= 32'b0;
+    partial_sum_bitwidth <= 32'b0;
+    mac_partial_sum_acc_b_bitwidth <= 32'b0;
+    mac_bias_adder_b_bitwidth <= 32'b0;
+  end
+  else begin
+    input_size <= input_size_external;
+    output_size <= output_size_external;
+    bias_size <= output_size_external;
+    weight_size <= input_size_external * output_size_external;
+    max_iter_accumulation <= input_size_external >> 5;
+    acc_32_out_bitwidth <= 32'd20;
+    // partial_sum_bitwidth <= 32'd20 + $clog2(input_size_external >> 5);
+    // mac_partial_sum_acc_b_bitwidth <= 32'd20 + $clog2(input_size_external >> 5) - 19;
+    // mac_bias_adder_b_bitwidth <= 32'd20 + $clog2(input_size_external >> 5) - 7;
+    
+    set_input_number_of_line(input_size, input_number_of_line);
+    set_output_number_of_line(output_size, output_number_of_line);
+    set_bias_number_of_line(bias_size, bias_number_of_line);
+    set_partial_sum_bitwidth(input_size_external, partial_sum_bitwidth);
+  end
+end
+
 // Bram operation
 always @(posedge clk or negedge rstn) begin
   if(!rstn) begin
@@ -200,10 +253,6 @@ always @(posedge clk or negedge rstn) begin
     m_axis_tkeep <= {4{1'b0}};
     m_axis_tlast <= 1'b0; 
     m_axis_tvalid <= 1'b0;
-
-    set_input_number_of_line(INPUT_SIZE, input_number_of_line);
-    set_output_number_of_line(OUTPUT_SIZE, output_number_of_line);
-    set_bias_number_of_line(BIAS_SIZE, bias_number_of_line);
 
     bram_state <= STATE_IDLE;
     bram_en <= 1'b0;
@@ -222,7 +271,7 @@ always @(posedge clk or negedge rstn) begin
     feature_weight_ready <= 1'b0;
     
     weight_counter <= {8{1'b0}};
-    feature_counter <= {8{1'b0}};
+    feature_counter <= {16{1'b0}};
     bias_counter <= {8{1'b0}};
     bias_pointer <= {3{1'b0}};
     feature_buffer <= {255{1'b0}};
@@ -257,6 +306,14 @@ always @(posedge clk or negedge rstn) begin
             bram_state <= STATE_RECEIVE_BIAS;
           end
         end
+        else if(!S_AXIS_TVALID) begin
+          bram_en <= 1'b0;
+          bram_we <= 1'b0;
+          if (S_AXIS_TLAST && feature_counter >= input_number_of_line) begin
+            feature_counter <= 16'b0;
+            F_writedone <= 1'b1;
+          end
+        end
         else begin
           s_axis_tready <= 1'b1;
           bram_en <= 1'b1;
@@ -264,14 +321,14 @@ always @(posedge clk or negedge rstn) begin
           bram_din <= S_AXIS_TDATA;
           if(feature_counter == 0) begin
             bram_addr <= FEATURE_START_ADDRESS;  
-            feature_counter <= feature_counter + 9'b1;
+            feature_counter <= feature_counter + 16'b1;
           end
           else if (S_AXIS_TLAST && feature_counter >= input_number_of_line) begin
-            feature_counter <= 8'b0;
+            feature_counter <= 16'b0;
             F_writedone <= 1'b1;
           end
           else begin
-            feature_counter <= feature_counter + 8'b1;
+            feature_counter <= feature_counter + 16'b1;
             bram_addr <= bram_addr + 9'b1;
           end
         end
@@ -296,6 +353,14 @@ always @(posedge clk or negedge rstn) begin
         else if(F_writedone) begin
           F_writedone <= 1'b0;
           s_axis_tready <= 1'b1;
+        end
+        else if(!S_AXIS_TVALID) begin
+          bram_en <= 1'b0;
+          bram_we <= 1'b0;
+          if (S_AXIS_TLAST && bias_counter >= bias_number_of_line) begin
+            bias_counter <= 4'b0;
+            B_writedone <= 1'b1;
+          end
         end
         else begin
           bram_en <= 1'b1;
@@ -326,7 +391,7 @@ always @(posedge clk or negedge rstn) begin
           weight_counter <= 8'b0;
           bram_state <= STATE_SET_FEATURE;
         end
-        else begin
+        else begin 
           if (weight_counter == 8'd0) begin
             B_writedone <= 1'b0;
             feature_weight_ready <= 1'b0;
@@ -360,7 +425,7 @@ always @(posedge clk or negedge rstn) begin
           bram_we <= 1'b0;
           feature_weight_ready <= 1'b1;
           bram_feature_tmp_addr <= bram_addr;
-          if (acc_done && acc_counter >= MAX_ITER_ACCUMULATION - 1) begin
+          if (acc_done && acc_counter >= max_iter_accumulation - 1) begin
             // calculating partial sum is done
             feature_set_done <= 1'b0;
             bram_state <= STATE_SET_BIAS;  
@@ -468,7 +533,7 @@ always @(posedge clk or negedge rstn) begin
           bram_we <= 1'b0;
           bram_bias_tmp_addr <= bram_addr;
           bias_set_done <= 1'b0;
-          if (out_counter >= OUTPUT_SIZE) begin
+          if (out_counter >= output_size) begin
             //bias_counter >= BIAS_SIZE
             // last bias is set
             bram_state <= STATE_IDLE;
@@ -525,6 +590,10 @@ always @(posedge clk or negedge rstn) begin
   if (!rstn) begin
     cal_state <= STATE_IDLE;
 
+    for(iter = 0; iter < 16'd256; iter = iter + 1) begin
+      output_buffer[iter] <= 8'b0;
+    end
+
     acc_en <= 1'b0;
     acc_counter <= {8{1'b0}};
     acc_32_done <= 1'b0;
@@ -534,32 +603,26 @@ always @(posedge clk or negedge rstn) begin
     partial_sum_done <= 1'b0;
     add_bias_done <= 1'b0;
     cal_done <= 1'b0;
-    out_counter <= {8{1'b0}};
-    iter <= 8'b0;
-
-    tmp_partial_sum[0] <= {ACC_32_OUT_BITWIDTH{1'b0}};
-    tmp_partial_sum[1] <= {ACC_32_OUT_BITWIDTH{1'b0}};
-    tmp_partial_sum[2] <= {ACC_32_OUT_BITWIDTH{1'b0}};
-    tmp_partial_sum[3] <= {ACC_32_OUT_BITWIDTH{1'b0}};
-    tmp_partial_sum[4] <= {ACC_32_OUT_BITWIDTH{1'b0}};
-    tmp_partial_sum[5] <= {ACC_32_OUT_BITWIDTH{1'b0}};
-    tmp_partial_sum[6] <= {ACC_32_OUT_BITWIDTH{1'b0}};
-    tmp_partial_sum[7] <= {ACC_32_OUT_BITWIDTH{1'b0}};
+    fc_done <= 1'b0;
+    out_counter <= {16{1'b0}};
+    iter <= 16'b0;
+    output_debug <= 32'b0;
+    max_index <= 32'b0;
 
     partial_sum_acc_en <= 1'b0;
     partial_sum_acc_data_a <= {ACC_32_OUT_BITWIDTH{1'b0}};
     partial_sum_acc_data_b <= {MAC_PARTIAL_SUM_ACC_B_BITWIDTH{1'b0}};
-    partial_sum_acc_data_c <= {PARTIAL_SUM_BITWIDTH{1'b0}};
+    partial_sum_acc_data_c <= {MAX_PARTIAL_SUM_BITWIDTH{1'b0}};
 
     bias_adder_en <= 1'b0;
-    bias_adder_data_a <= {BIAS_SIZE{1'b0}};  // BIAS_SIZE
+    bias_adder_data_a <= {8{1'b0}};  // BIAS_SIZE
     bias_adder_data_b <= {MAC_BIAS_ADDER_B_BITWIDTH{1'b0}}; // difference between OUT_BITWIDTH and A_BITWIDTH
-    bias_adder_data_c <= {PARTIAL_SUM_BITWIDTH{1'b0}}; //  OUT_BITWIDTH is related to MAX_ITER_ACCUMULATION
+    bias_adder_data_c <= {MAX_PARTIAL_SUM_BITWIDTH{1'b0}}; //  OUT_BITWIDTH is related to MAX_ITER_ACCUMULATION
   end
   else begin
     case(cal_state)
       STATE_IDLE: begin
-        if(feature_weight_ready && out_counter < OUTPUT_SIZE) begin
+        if(feature_weight_ready && out_counter < output_size) begin
           cal_state <= STATE_ACC_32;
         end
         else begin
@@ -581,7 +644,7 @@ always @(posedge clk or negedge rstn) begin
           if (acc_done) begin
             acc_en <= 1'b0;
             tmp_partial_sum[acc_counter] <= acc_result;
-            if (acc_counter >= MAX_ITER_ACCUMULATION - 1) begin
+            if (acc_counter >= max_iter_accumulation - 1) begin
               acc_32_done <= 1'b1;
             end
             else begin
@@ -603,7 +666,7 @@ always @(posedge clk or negedge rstn) begin
       // sums up every result from accumulation_32 module
       // to get [W0 * I0 + ... + W(INPUTSIZE-1)*I(INPUT_SIZE-1)]
       STATE_PARTIAL_SUM: begin
-        if (partial_sum_done && partial_sum_counter > MAX_ITER_ACCUMULATION) begin
+        if (partial_sum_done && partial_sum_counter > max_iter_accumulation) begin
           partial_sum_acc_en <= 1'b0;
           partial_sum_counter <= 8'b0;  
           cal_state <= STATE_ADD_BIAS;
@@ -614,17 +677,17 @@ always @(posedge clk or negedge rstn) begin
             partial_sum_acc_en <= 1'b1;
 
             partial_sum_acc_data_a <= tmp_partial_sum[partial_sum_counter];
-            partial_sum_acc_data_b <= 4'b0001;                               // need to parameterize
-            partial_sum_acc_data_c <= {PARTIAL_SUM_BITWIDTH{1'b0}};
+            partial_sum_acc_data_b <= 2'b01;                               // need to parameterize
+            partial_sum_acc_data_c <= {MAX_PARTIAL_SUM_BITWIDTH{1'b0}};
 
             partial_sum_counter <= partial_sum_counter + 8'b1;
           end
           else if (partial_sum_acc_done) begin
             partial_sum_acc_data_a <= tmp_partial_sum[partial_sum_counter];
-            partial_sum_acc_data_b <= 4'b0001;                               // need to parameterize
+            partial_sum_acc_data_b <= 2'b01;                               // need to parameterize
             partial_sum_acc_data_c <= partial_sum_acc_out;
 
-            if (partial_sum_counter == 8'd8) begin
+            if (partial_sum_counter == max_iter_accumulation) begin
               partial_sum_done <= 1'b1;
               partial_sum_counter <= partial_sum_counter + 8'b1;
             end
@@ -642,13 +705,23 @@ always @(posedge clk or negedge rstn) begin
       // 3. take sign bit and [12:6] bits.
       STATE_ADD_BIAS: begin
         if(add_bias_done) begin
-          add_bias_done <= 1'b0;
-          if (out_counter >= OUTPUT_SIZE) begin
+          // if output_size = 10
+          // set max_index
+          if (output_size == 32'd10) begin
+            set_max_index(max_index);
+          end
+
+          if (out_counter >= output_size) begin
             // out_counter <= {8{1'b0}};
             cal_done <= 1'b1;
-            cal_state <= STATE_DATA_SEND;
+            if (COMMAND == 3'b101) begin
+              output_debug <= {output_buffer[3], output_buffer[2] ,output_buffer[1], output_buffer[0]};
+              add_bias_done <= 1'b0;
+              cal_state <= STATE_DATA_SEND;
+            end
           end
           else begin
+            add_bias_done <= 1'b0;
             cal_state <= STATE_IDLE;
           end
         end
@@ -657,67 +730,88 @@ always @(posedge clk or negedge rstn) begin
           partial_sum_done <= 1'b0;
           if (bias_adder_done) begin
             bias_adder_en <= 1'b0;
-            if (bias_adder_out[PARTIAL_SUM_BITWIDTH-1:13] == {(PARTIAL_SUM_BITWIDTH){1'b0}})  begin
-              output_buffer[out_counter] <= {bias_adder_out[PARTIAL_SUM_BITWIDTH], bias_adder_out[12:6]};  
-              out_counter <= out_counter + 8'b1;
+            if (bias_adder_out[MAX_PARTIAL_SUM_BITWIDTH-1:13] == {MAX_PARTIAL_SUM_BITWIDTH{1'b0}})  begin
+            // positive and not OF
+              output_buffer[out_counter] <= {bias_adder_out[partial_sum_bitwidth], bias_adder_out[12:6]};  
+              out_counter <= out_counter + 16'b1;
               add_bias_done <= 1'b1;
             end
-            else if(bias_adder_out[PARTIAL_SUM_BITWIDTH-1:13] == {(PARTIAL_SUM_BITWIDTH-13){1'b1}}) begin
+            else if(bias_adder_out[MAX_PARTIAL_SUM_BITWIDTH-1:13] == {(MAX_PARTIAL_SUM_BITWIDTH-13){1'b1}}) begin
+            // negative and not OF
               if (relu) begin
-                if (bias_adder_out[PARTIAL_SUM_BITWIDTH] == 1) begin
+                if (bias_adder_out[partial_sum_bitwidth] == 1'b1) begin
                   output_buffer[out_counter] <= {8{1'b0}};
                 end
                 else begin
-                  output_buffer[out_counter] <= {bias_adder_out[PARTIAL_SUM_BITWIDTH], bias_adder_out[12:6] + 1'b1};  
+                  output_buffer[out_counter] <= {bias_adder_out[partial_sum_bitwidth], bias_adder_out[12:6] + 1'b1};  
                 end  
               end
               else begin
-                output_buffer[out_counter] <= {bias_adder_out[PARTIAL_SUM_BITWIDTH], bias_adder_out[12:6] + 1'b1};  
+                output_buffer[out_counter] <= {bias_adder_out[partial_sum_bitwidth], bias_adder_out[12:6] + 1'b1};  
               end
-              out_counter <= out_counter + 8'b1;
+              out_counter <= out_counter + 16'b1;
               add_bias_done <= 1'b1;
             end
-            else if (bias_adder_out[PARTIAL_SUM_BITWIDTH] == 1'b1) begin
-              // negative Overflow
-              output_buffer[out_counter] <= 8'b1000_0000;
-              out_counter <= out_counter + 8'b1;
+            else if (bias_adder_out[partial_sum_bitwidth] == 1'b1) begin
+            // negative and Overflow
+              if (relu) begin
+                output_buffer[out_counter] <= 8'b0000_0000;
+              end
+              else begin
+                output_buffer[out_counter] <= 8'b1000_0000;
+              end
+              out_counter <= out_counter + 16'b1;
               add_bias_done <= 1'b1;
             end
-            else begin
-              // positive Overflow
+            else if(bias_adder_out[partial_sum_bitwidth] == 1'b0) begin
+            // positive and Overflow
               output_buffer[out_counter] <= 8'b0111_1111;
-              out_counter <= out_counter + 8'b1;
+              out_counter <= out_counter + 16'b1;
               add_bias_done <= 1'b1;
-            end  
+            end 
+            else begin
+              output_buffer[out_counter] <= 8'b0000_0000;
+              out_counter <= out_counter + 16'b1;
+              add_bias_done <= 1'b1;
+            end 
           end
           else begin
             bias_adder_en <= 1'b1;
             bias_adder_data_a <= bias_buffer;
-            bias_adder_data_b <= 16'b0000_0000_0100_0000; // need to parameterize
+            bias_adder_data_b <= 8'b0100_0000; // need to parameterize
             bias_adder_data_c <= partial_sum_acc_out;
           end     
         end
       end
       
       STATE_DATA_SEND: begin
-        if(M_AXIS_TLAST) begin
-          out_counter <= 8'b0;
-          fc_done <= 1'b1;
-          cal_state <= STATE_IDLE;
-        end
-        else begin
-          m_axis_tvalid <= 1'b1;
-          if (M_AXIS_TREADY) begin
-          // send output data which saved in output_buffer register
-            if (iter >= output_number_of_line) begin
-              m_axis_tvalid <= 1'b0;
-              m_axis_tlast <= 1'b1;
-            end
-            else begin
-              m_axis_tdata <= {output_buffer[4*iter + 3], output_buffer[4*iter + 2], output_buffer[4*iter + 1], output_buffer[4*iter]};  
-              iter <= iter + 8'b1;  
-            end
+        if (iter >= output_number_of_line) begin
+          if (M_AXIS_TLAST)  begin
+            // tlast fall
+            m_axis_tlast <= 1'b0;
+            m_axis_tvalid <= 1'b0;
+            m_axis_tdata <= 32'b0;  
           end
+          else if (COMMAND == 3'b000) begin
+            cal_state <= STATE_IDLE;
+            fc_done <= 1'b0;
+          end
+          else begin
+            cal_done <= 1'b0;
+          end
+        end
+        else if (iter == output_number_of_line - 1) begin
+          // tlast rise 
+          m_axis_tlast <= 1'b1; 
+          // fc done rise
+          fc_done <= 1'b1;
+          m_axis_tdata <= {output_buffer[4*iter + 3], output_buffer[4*iter + 2], output_buffer[4*iter + 1], output_buffer[4*iter]};  
+          iter <= iter + 16'b1;
+        end
+        else if (M_AXIS_TREADY) begin
+          m_axis_tvalid <= 1'b1;
+          m_axis_tdata <= {output_buffer[4*iter + 3], output_buffer[4*iter + 2], output_buffer[4*iter + 1], output_buffer[4*iter]};  
+          iter <= iter + 16'b1;
         end
       end
 
@@ -729,32 +823,72 @@ end
   //******** Task ********
   //-----------------------
 
-  task set_input_number_of_line (input [31:0] input_size, output [31:0] number_of_line);
+  task set_input_number_of_line (input [31:0] number_of_input, output [31:0] number_of_line);
     begin
-      number_of_line = input_size >> 2;
+      number_of_line = number_of_input >> 2;
     end
   endtask
 
-  task set_output_number_of_line (input [31:0] output_size, output [31:0] number_of_line);
+  task set_output_number_of_line (input [31:0] number_of_output, output [31:0] number_of_line);
     begin
       if (output_size == 32'd10) begin
-        number_of_line = (output_size >> 2) + 1;
+        number_of_line = (number_of_output >> 2) + 1;
       end
       else begin
-        number_of_line = output_size >> 2;
+        number_of_line = number_of_output >> 2;
       end
     end
   endtask
 
-  task set_bias_number_of_line (input [31:0] bias_size, output [31:0] number_of_line);
+  task set_bias_number_of_line (input [31:0] number_of_bias, output [31:0] number_of_line);
     begin
-      if (bias_size == 32'd10) begin
-        number_of_line = (bias_size >> 2) + 1;
+      if (number_of_bias == 32'd10) begin
+        number_of_line = (number_of_bias >> 2) + 1;
       end
       else begin
-        number_of_line = bias_size >> 2;
+        number_of_line = number_of_bias >> 2;
       end
     end
   endtask
 
+  task set_partial_sum_bitwidth (input [31:0] input_size, output [31:0] partial_sum_bitwidth);
+    begin
+    // possible input size:          1568, 1024, 256, 64
+    // possible partial_sum_bitwidth:   26,   25,  23, 21 
+      if (input_size > 32'd1024) begin
+        partial_sum_bitwidth = 32'd26;
+      end
+      else if (input_size > 32'd512) begin
+        partial_sum_bitwidth = 32'd25;
+      end
+      else if (input_size > 32'd256) begin
+        partial_sum_bitwidth = 32'd24;
+      end
+      else if (input_size > 32'd128) begin
+        partial_sum_bitwidth = 32'd23;
+      end
+      else if (input_size > 32'd64)  begin
+        partial_sum_bitwidth = 32'd22;
+      end
+      else if (input_size > 32'd32)  begin
+        partial_sum_bitwidth = 32'd21;
+      end
+    end
+  endtask
+
+  task set_max_index(output [31:0] max_index);
+    begin: sort
+      reg [31:0] tmp_max_index;
+      reg [3:0]  i;
+      tmp_max_index = 32'd0;
+      for (i = 1; i < 10; i = i + 1) begin
+        if (output_buffer[i] > output_buffer[tmp_max_index]) begin
+          tmp_max_index = i;
+        end
+      end
+      max_index = tmp_max_index;
+    end
+  endtask
+  //-------------------------------
+  //-------------------------------
 endmodule

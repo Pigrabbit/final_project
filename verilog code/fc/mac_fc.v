@@ -1,5 +1,3 @@
-`timescale 1ns/1ps;
-
 module mac_fc #(
     parameter integer A_BITWIDTH = 8,
     parameter integer B_BITWIDTH = A_BITWIDTH,

@@ -3,9 +3,7 @@
 
 module top_fc #
 (
-    parameter integer C_S00_AXIS_TDATA_WIDTH   = 32,
-    parameter integer INPUT_SIZE = 256,
-    parameter integer OUTPUT_SIZE = 64
+    parameter integer C_S00_AXIS_TDATA_WIDTH   = 32
 )
 (
     input wire                                        CLK,
@@ -34,20 +32,22 @@ module top_fc #
     input wire [31:0]                                 PWDATA,
     output wire [31:0]                                PRDATA,
     output wire                                       PREADY,
-    output wire                                       PSLVERR,
+    output wire                                       PSLVERR
 
 /// design reference from module_example
-    input wire [2:0] COMMAND,
-    input wire [20:0] receive_size,
-    output wire F_writedone,
-    output wire W_writedone,
-    output wire B_writedone,
-    output wire cal_done,
-    input wire fc_start,
-    output wire fc_done,
-    output reg start_response,
-    input wire done_response,
-    input wire relu
+    // input wire [31:0] input_size_external,
+    // input wire [31:0] output_size_external,
+    // input wire [2:0] COMMAND,
+    // input wire [20:0] receive_size,
+    // output wire F_writedone,
+    // output wire W_writedone,
+    // output wire B_writedone,
+    // output wire cal_done,
+    // input wire fc_start,
+    // output wire fc_done,
+    // output reg start_response,
+    // input wire done_response,
+    // input wire relu
     );
 
  // For FC control path
@@ -55,6 +55,20 @@ module top_fc #
     wire          fc_done;
     wire [31:0]   clk_counter;
     wire [31:0]   max_index;
+    wire [31:0]   input_size;
+    wire [31:0]   output_size;
+    wire [2:0]    COMMAND;
+    // wire [20:0]   receive_size;
+    wire          F_writedone;
+    wire          B_writedone;
+    wire          W_writedone;
+    wire          cal_done;
+    wire          relu;
+
+    // for debugging
+    wire [15:0]   iter;
+    wire [31:0]   output_debug;
+
     assign PREADY = 1'b1;
     assign PSLVERR = 1'b0;
 
@@ -66,23 +80,35 @@ clk_counter u_clk_counter(
         .clk_counter(clk_counter)
     );
 
-// apb_fc u_apb_fc(
-//         .PCLK(CLK),
-//         .PRESETB(RESETN),
-//         .PADDR({16'd0,PADDR[15:0]}),
-//         .PSEL(PSEL),
-//         .PENABLE(PENABLE),
-//         .PWRITE(PWRITE),
-//         .PWDATA(PWDATA),
-//         .fc_start(fc_start),
-//         .fc_done(fc_done),
-//         .clk_counter(clk_counter),
-//         .max_index(max_index),
-//         .PRDATA(PRDATA)
-//       );
+apb_fc_debug u_apb_fc_debug(
+        .PCLK(CLK),
+        .PRESETB(RESETN),
+        .PADDR({16'd0,PADDR[15:0]}),
+        .PSEL(PSEL),
+        .PENABLE(PENABLE),
+        .PWRITE(PWRITE),
+        .PWDATA(PWDATA),
+        .fc_start(fc_start),
+        .fc_done(fc_done),
+        .clk_counter(clk_counter),
+        // .max_index(max_index),
+        .input_size(input_size),
+        .output_size(output_size),
+        .COMMAND(COMMAND),
+        // .receive_size(receive_size),
+        .iter(iter),
+        .F_writedone(F_writedone),
+        .B_writedone(B_writedone),
+        .W_writedone(W_writedone),
+        .cal_done(cal_done),
+        .relu(relu),
+        .M_AXIS_TVALID(M_AXIS_TVALID),
+        .output_debug(output_debug),
+        .M_AXIS_TLAST(M_AXIS_TLAST),
+        .PRDATA(PRDATA)
+      );
 
-fc #(.INPUT_SIZE(INPUT_SIZE), .OUTPUT_SIZE(OUTPUT_SIZE))
-    u_fc(
+fc u_fc(
         .clk(CLK),
         .rstn(RESETN),
         .S_AXIS_TREADY(S_AXIS_TREADY),
@@ -100,13 +126,17 @@ fc #(.INPUT_SIZE(INPUT_SIZE), .OUTPUT_SIZE(OUTPUT_SIZE))
         .fc_start(fc_start),
         .max_index(max_index),
         .fc_done(fc_done),
-        /// reference from module_example
+        .input_size_external(input_size),
+        .output_size_external(output_size),
         .COMMAND(COMMAND),
-        .receive_size(receive_size),
+        // .receive_size(receive_size),
         .F_writedone(F_writedone),
         .W_writedone(W_writedone),
         .B_writedone(B_writedone),
         .cal_done(cal_done),
+        // for debugging
+        .iter(iter),
+        .output_debug(output_debug),
         .relu(relu)
       );
 
